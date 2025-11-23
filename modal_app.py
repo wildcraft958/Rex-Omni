@@ -21,12 +21,27 @@ image = (
     Image.from_registry("nvidia/cuda:12.4.0-devel-ubuntu22.04", add_python="3.10")
     .apt_install("git", "libgl1", "wget")
     .run_commands(
+        # 1. Core stack
         "pip install torch==2.6.0 torchvision==0.21.0 --index-url https://download.pytorch.org/whl/cu124",
         "pip install ninja packaging psutil setuptools wheel",
-        "pip install flash-attn==2.7.4.post1 --no-build-isolation",
+        
+        # 2. NumPy + Numba compatibility (install early)
+        "pip install 'numpy<2.1' 'numba<0.61'",
+        
+        # 3. vLLM + flash-attn
         "pip install vllm==0.8.2",
+        "pip install flash-attn==2.7.4.post1 --no-build-isolation",
+        
+        # 4. Rest of stack
         "pip install git+https://github.com/facebookresearch/segment-anything.git",
-        "pip install spacy opencv-python pillow numpy transformers accelerate qwen_vl_utils shapely pycocotools gradio_image_prompter matplotlib"
+        "pip install spacy opencv-python pillow transformers accelerate qwen_vl_utils shapely pycocotools gradio_image_prompter matplotlib",
+        
+        # 5. CRITICAL: Force-reinstall numpy/numba at compatible versions
+        # (other packages may have upgraded them as dependencies)
+        "pip install --force-reinstall --no-deps 'numpy<2.1' 'numba<0.61'",
+        
+        # 6. Verify versions
+        "python -c \"import numpy, numba; print('NUMPY', numpy.__version__, 'NUMBA', numba.__version__)\""
     )
     .run_function(download_models)
     .add_local_dir("/home/bakasur/Desktop/Rex-Omni/rex_omni", remote_path="/root/rex_omni")
@@ -37,7 +52,9 @@ app = App("rex-omni-service", image=image)
 print("LOADING MODAL APP MODULE - VERSION 2")
 
 @app.cls(
-    gpu="A100-40GB",
+    gpu="A100-80GB",     # Production-grade GPU with 80GB VRAM
+    memory=131072,      # 128 GB RAM - no memory knife fights
+    cpu=32,             # 32 vCPUs for batch processing
     scaledown_window=300,
     timeout=600
 )
