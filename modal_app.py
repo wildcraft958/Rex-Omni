@@ -18,7 +18,7 @@ def download_models():
 
 image = (
     Image.from_registry("nvidia/cuda:12.4.0-devel-ubuntu22.04", add_python="3.10")
-    .apt_install("git", "libgl1")
+    .apt_install("git", "libgl1", "wget")
     .run_commands(
         "pip install torch==2.6.0 torchvision==0.21.0 --index-url https://download.pytorch.org/whl/cu124",
         "pip install ninja packaging psutil setuptools wheel",
