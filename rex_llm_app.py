@@ -32,7 +32,7 @@ def build_llm_image():
             "pip install flash-attn==2.7.4.post1 --no-build-isolation",
             
             # 4. Minimal dependencies for Rex-Omni
-            "pip install pillow transformers qwen_vl_utils",
+            "pip install pillow transformers accelerate qwen_vl_utils",
             
             # 5. Force-reinstall to prevent version drift
             "pip install --force-reinstall --no-deps 'numpy<2.1' 'numba<0.61'",
@@ -68,14 +68,13 @@ class RexLLMService:
         try:
             self.rex_model = RexOmniWrapper(
                 model_path="IDEA-Research/Rex-Omni-AWQ",
-                backend="vllm",
+                backend="transformers",  # Use transformers instead of vllm to avoid CUDA fork issues
                 quantization="awq",
                 max_tokens=2048,
                 temperature=0.0,
                 top_p=0.05,
                 top_k=1,
                 repetition_penalty=1.05,
-                gpu_memory_utilization=0.9,  # Can use more since SAM is elsewhere
             )
             print(">>> Rex-Omni LLM initialized successfully")
             print(">>> rex_model set?", hasattr(self, "rex_model"))
@@ -147,3 +146,10 @@ def rex_inference(item: Dict = Body(...)):
         visual_prompt_boxes=item.get("visual_prompt_boxes"),
         **item.get("kwargs", {})
     )
+
+
+if __name__ == "__main__":
+    # For local testing
+    import modal
+    with modal.Runner() as runner:
+        print("Rex LLM Service ready")
