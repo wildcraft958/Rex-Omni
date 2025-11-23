@@ -139,7 +139,7 @@ class VisionService:
 
         url = os.getenv(
             "REX_LLM_HTTP_URL",
-            "https://animeshraj958--rex-llm-service-rex_inference.modal.run",
+            "https://animeshraj958--rex-llm-service-rex-inference.modal.run",
         )
 
         try:
