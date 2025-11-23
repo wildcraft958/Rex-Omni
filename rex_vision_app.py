@@ -38,7 +38,7 @@ def build_vision_image():
             
             # Vision dependencies (no vLLM!)
             "pip install git+https://github.com/facebookresearch/segment-anything.git",
-            "pip install spacy opencv-python pillow numpy shapely pycocotools matplotlib fastapi",
+            "pip install spacy opencv-python pillow numpy shapely pycocotools matplotlib fastapi requests",
             
             # Download spacy model
             "python -m spacy download en_core_web_sm",
@@ -102,32 +102,50 @@ class VisionService:
         print(">>> nlp set?", hasattr(self, "nlp"))
         print(">>> VisionService initialization complete")
 
-    def _get_rex_llm_inference(self):
-        """Lookup Rex LLM service function at runtime"""
+    def _call_rex_llm(self, image_data: str, task: str, categories: List[str]) -> Dict[str, Any]:
+        """Call Rex LLM service via HTTP"""
+        import requests
+        
+        url = "https://animeshraj958--rex-llm-service-rex-inference.modal.run"
+        payload = {
+            "image": image_data,
+            "task": task,
+            "categories": categories
+        }
+        
         try:
-            # Use Modal Function.lookup to find the deployed function
-            rex_func = modal.Function.lookup("rex-llm-service", "rex_inference")
-            return rex_func
+            print(f">>> Calling Rex LLM service at {url}")
+            response = requests.post(url, json=payload, timeout=120)
+            response.raise_for_status()
+            return response.json()
         except Exception as e:
-            print(f"WARNING: Could not lookup rex-llm-service/rex_inference: {e}")
-            print("Falling back to direct import...")
-            # Fallback: try direct import (works if both deployed)
-            from rex_llm_app import rex_inference
-            return rex_inference
+            print(f"ERROR calling Rex LLM service: {e}")
+            return {"success": False, "error": str(e)}
 
     def _decode_image(self, image_data: Union[str, bytes]):
         from PIL import Image as PILImage
         import numpy as np
 
-        if isinstance(image_data, str):
-            if "," in image_data:
-                image_data = image_data.split(",")[1]
-            image_bytes = base64.b64decode(image_data)
-        else:
-            image_bytes = image_data
+        try:
+            if isinstance(image_data, str):
+                # Handle data URI format (data:image/jpeg;base64,...)
+                if "," in image_data and image_data.startswith("data:"):
+                    image_data = image_data.split(",", 1)[1]
+                
+                # Remove whitespace
+                image_data = image_data.strip()
+                image_bytes = base64.b64decode(image_data)
+            else:
+                image_bytes = image_data
 
-        img = PILImage.open(io.BytesIO(image_bytes)).convert("RGB")
-        return img, np.array(img)
+            img = PILImage.open(io.BytesIO(image_bytes)).convert("RGB")
+            return img, np.array(img)
+        except Exception as e:
+            print(f"ERROR decoding image: {e}")
+            if isinstance(image_data, str):
+                print(f"Image data length: {len(image_data)}")
+                print(f"First 100 chars: {image_data[:100]}")
+            raise ValueError(f"Failed to decode image: {e}")
 
     @method()
     def sam_inference(self, image_data: str, categories: List[str]) -> Dict[str, Any]:
@@ -152,13 +170,11 @@ class VisionService:
 
         # 2. Call Rex LLM service for detection
         print(">>> Calling Rex LLM service...")
-        rex_llm_func = self._get_rex_llm_inference()
-        rex_payload = {
-            "image": image_data,
-            "task": "detection",
-            "categories": categories,
-        }
-        rex_results = rex_llm_func.remote(rex_payload)
+        rex_results = self._call_rex_llm(
+            image_data=image_data,
+            task="detection",
+            categories=categories
+        )
 
         if not rex_results.get("success", False):
             return {
@@ -267,13 +283,11 @@ class VisionService:
 
         # Call Rex LLM for phrase grounding
         print(f">>> Calling Rex LLM service for grounding {len(unique_phrases)} phrases...")
-        rex_llm_func = self._get_rex_llm_inference()
-        rex_payload = {
-            "image": image_data,
-            "task": "detection",
-            "categories": unique_phrases,
-        }
-        rex_results = rex_llm_func.remote(rex_payload)
+        rex_results = self._call_rex_llm(
+            image_data=image_data,
+            task="detection",
+            categories=unique_phrases
+        )
 
         if not rex_results.get("success", False):
             return {

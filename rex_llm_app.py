@@ -31,7 +31,7 @@ def build_llm_image():
             "pip install vllm==0.8.2",
             "pip install flash-attn==2.7.4.post1 --no-build-isolation",
             
-            # 4. Minimal dependencies for Rex-Omni
+            # 4. Minimal dependencies for Rex-Omni (transformers backend, no quantization)
             "pip install pillow transformers accelerate qwen_vl_utils",
             
             # 5. Force-reinstall to prevent version drift
@@ -67,9 +67,9 @@ class RexLLMService:
         print(">>> ENTER RexLLMService.initialize()")
         try:
             self.rex_model = RexOmniWrapper(
-                model_path="IDEA-Research/Rex-Omni-AWQ",
+                model_path="IDEA-Research/Rex-Omni",
                 backend="transformers",  # Use transformers instead of vllm to avoid CUDA fork issues
-                quantization="awq",
+                quantization=None,  # Disable AWQ for transformers backend (version conflicts)
                 max_tokens=2048,
                 temperature=0.0,
                 top_p=0.05,
@@ -85,10 +85,25 @@ class RexLLMService:
 
     def _decode_image(self, image_data: str):
         from PIL import Image as PILImage
-        if "," in image_data:
-            image_data = image_data.split(",")[1]
-        image_bytes = base64.b64decode(image_data)
-        return PILImage.open(io.BytesIO(image_bytes)).convert("RGB")
+        
+        try:
+            # Handle data URI format (data:image/jpeg;base64,...)
+            if "," in image_data and image_data.startswith("data:"):
+                image_data = image_data.split(",", 1)[1]
+            
+            # Remove any whitespace
+            image_data = image_data.strip()
+            
+            # Decode base64
+            image_bytes = base64.b64decode(image_data)
+            
+            # Open image
+            return PILImage.open(io.BytesIO(image_bytes)).convert("RGB")
+        except Exception as e:
+            print(f"ERROR decoding image: {e}")
+            print(f"Image data length: {len(image_data) if image_data else 0}")
+            print(f"First 100 chars: {image_data[:100] if image_data else 'None'}")
+            raise ValueError(f"Failed to decode image: {e}")
 
     @method()
     def inference(
