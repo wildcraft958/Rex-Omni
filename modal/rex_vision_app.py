@@ -7,6 +7,7 @@ Calls Rex LLM Service for object detection
 """
 
 import io
+import os
 import base64
 from typing import List, Dict, Any, Optional, Union
 
@@ -103,23 +104,51 @@ class VisionService:
         print(">>> VisionService initialization complete")
 
     def _call_rex_llm(self, image_data: str, task: str, categories: List[str]) -> Dict[str, Any]:
-        """Call Rex LLM service via HTTP"""
-        import requests
-        
-        url = "https://animeshraj958--rex-llm-service-rex-inference.modal.run"
+        """Call Rex LLM service via Modal lookup, local import, or HTTP fallback"""
         payload = {
             "image": image_data,
             "task": task,
-            "categories": categories
+            "categories": categories,
         }
-        
+
+        # 1. Try Modal function lookup if supported in this runtime
+        lookup_target = getattr(getattr(modal, "Function", None), "lookup", None)
+        if callable(lookup_target):
+            try:
+                print(">>> Calling Rex LLM via modal.Function.lookup('rex-llm-service', 'rex_inference')")
+                rex_func = lookup_target("rex-llm-service", "rex_inference")
+                return rex_func.call(item=payload)
+            except Exception as exc:
+                print(f"WARNING: Modal function lookup failed: {exc}. Falling back...")
+
+        # 2. Optional local import (only works if rex_llm_app is bundled in image)
         try:
-            print(f">>> Calling Rex LLM service at {url}")
+            import importlib
+
+            rex_module = importlib.import_module("rex_llm_app")
+            if hasattr(rex_module, "rex_inference"):
+                print(">>> Calling rex_llm_app.rex_inference directly (local import)")
+                return rex_module.rex_inference(item=payload)
+        except ModuleNotFoundError:
+            print("INFO: rex_llm_app module not found inside vision image. Skipping local import.")
+        except Exception as exc:
+            print(f"WARNING: Local rex_llm_app import failed: {exc}. Falling back...")
+
+        # 3. HTTP fallback as a last resort
+        import requests
+
+        url = os.getenv(
+            "REX_LLM_HTTP_URL",
+            "https://animeshraj958--rex-llm-service-rex_inference.modal.run",
+        )
+
+        try:
+            print(f">>> Calling Rex LLM service over HTTP at {url}")
             response = requests.post(url, json=payload, timeout=120)
             response.raise_for_status()
             return response.json()
         except Exception as e:
-            print(f"ERROR calling Rex LLM service: {e}")
+            print(f"ERROR calling Rex LLM service over HTTP: {e}")
             return {"success": False, "error": str(e)}
 
     def _decode_image(self, image_data: Union[str, bytes]):
