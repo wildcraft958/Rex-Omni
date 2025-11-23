@@ -1,0 +1,57 @@
+.image-preview-wrap {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.image-preview-stage {
+    position: relative;
+    display: inline-block; /* size to image so overlay matches image */
+    text-align: left;
+    width: auto;
+}
+
+.image-preview-stage .image-preview {
+    max-width: 100%;
+    height: auto;
+    display: block;
+    border-radius: var(--radius-sm);
+}
+
+.overlay {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none; /* allow clicks to pass to image */
+}
+
+.overlay-box {
+    position: absolute;
+    border: 2px solid rgba(255, 80, 80, 0.95);
+    background: rgba(255, 80, 80, 0.06);
+    box-sizing: border-box;
+    pointer-events: auto;
+}
+
+.overlay-label {
+    position: absolute;
+    top: -20px;
+    left: 0;
+    background: rgba(255, 80, 80, 0.95);
+    color: white;
+    font-weight: 700;
+    font-size: 12px;
+    padding: 2px 6px;
+    border-radius: 3px;
+    white-space: nowrap;
+}
+
+@media (max-width: 768px) {
+    .overlay-label {
+        font-size: 11px;
+        top: -18px;
+    }
+}

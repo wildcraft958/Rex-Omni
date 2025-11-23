@@ -5,6 +5,7 @@ import ServiceSelector from './components/ServiceSelector';
 import TaskSelector from './components/TaskSelector';
 import ParameterInputs from './components/ParameterInputs';
 import ResultsDisplay from './components/ResultsDisplay';
+import ImagePreview from './components/ImagePreview';
 import Header from './components/Header';
 
 const API_ENDPOINTS = {
@@ -157,8 +158,7 @@ function App() {
           <div className="results-panel">
             {imagePreview && (
               <div className="image-preview-container glass-card">
-                <h3>Image Preview</h3>
-                <img src={imagePreview} alt="Preview" className="image-preview" />
+                <ImagePreview imageSrc={imagePreview} results={results} />
               </div>
             )}
 
