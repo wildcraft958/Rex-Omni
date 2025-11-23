@@ -3,7 +3,7 @@ import io
 import json
 import base64
 from typing import List, Dict, Any, Optional, Union
-from modal import Image, App, method, gpu, fastapi_endpoint
+from modal import Image, App, method, gpu, fastapi_endpoint, enter
 from fastapi import Body, Request
 
 # Define the image with necessary dependencies
@@ -34,44 +34,71 @@ image = (
 
 app = App("rex-omni-service", image=image)
 
+print("LOADING MODAL APP MODULE - VERSION 2")
+
 @app.cls(
     gpu="A100-40GB",
     scaledown_window=300,
     timeout=600
 )
 class RexOmniService:
-    def __enter__(self):
-        import sys
-        sys.path.append("/root") # Ensure rex_omni is importable
-        
-        from rex_omni import RexOmniWrapper
-        from segment_anything import sam_model_registry, SamPredictor
-        import spacy
-        import torch
 
-        print("Initializing Rex-Omni Model...")
-        self.rex_model = RexOmniWrapper(
-            model_path="IDEA-Research/Rex-Omni-AWQ",
-            backend="vllm",
-            quantization="awq",
-            max_tokens=2048,
-            temperature=0.0,
-            top_p=0.05,
-            top_k=1,
-            repetition_penalty=1.05,
-            gpu_memory_utilization=0.7, # Leave some memory for SAM
-        )
+    @enter()
+    def initialize(self):
+        print(">>> ENTER initialize()")
+        try:
+            import sys
+            import traceback
+            sys.path.append("/root") # Ensure rex_omni is importable
+            
+            from rex_omni import RexOmniWrapper
+            from segment_anything import sam_model_registry, SamPredictor
+            import spacy
+            import torch
 
-        print("Initializing SAM Model...")
-        self.sam_checkpoint = "/root/sam_vit_h_4b8939.pth"
-        self.sam = sam_model_registry["vit_h"](checkpoint=self.sam_checkpoint)
-        self.sam.to(device="cuda")
-        self.sam_predictor = SamPredictor(self.sam)
+            print("Initializing Rex-Omni Model...")
+            try:
+                self.rex_model = RexOmniWrapper(
+                    model_path="IDEA-Research/Rex-Omni-AWQ",
+                    backend="vllm",
+                    quantization="awq",
+                    max_tokens=2048,
+                    temperature=0.0,
+                    top_p=0.05,
+                    top_k=1,
+                    repetition_penalty=1.05,
+                    gpu_memory_utilization=0.7, # Leave some memory for SAM
+                )
+                print("Rex-Omni Model Initialized Successfully.")
+            except Exception as e:
+                print(f"Error initializing Rex-Omni Model: {e}")
+                traceback.print_exc()
+                raise e
 
-        print("Initializing Spacy...")
-        self.nlp = spacy.load("en_core_web_sm")
-        
-        print("Initialization Complete.")
+            print("Initializing SAM Model...")
+            try:
+                self.sam_checkpoint = "/root/sam_vit_h_4b8939.pth"
+                self.sam = sam_model_registry["vit_h"](checkpoint=self.sam_checkpoint)
+                self.sam.to(device="cuda")
+                self.sam_predictor = SamPredictor(self.sam)
+                print("SAM Model Initialized Successfully.")
+            except Exception as e:
+                print(f"Error initializing SAM Model: {e}")
+                traceback.print_exc()
+                raise e
+
+            print("Initializing Spacy...")
+            self.nlp = spacy.load("en_core_web_sm")
+            
+            print(">>> self.rex_model set?", hasattr(self, "rex_model"))
+            print(">>> self.sam_predictor set?", hasattr(self, "sam_predictor"))
+            print(">>> self.nlp set?", hasattr(self, "nlp"))
+            print(">>> INITIALIZE COMPLETED")
+        except Exception as e:
+            print(f"CRITICAL ERROR IN INITIALIZE: {e}")
+            import traceback
+            traceback.print_exc()
+            raise e
 
     def _decode_image(self, image_data: Union[str, bytes]) -> Any:
         from PIL import Image as PILImage
@@ -98,6 +125,10 @@ class RexOmniService:
         visual_prompt_boxes: Optional[List[List[float]]] = None,
         **kwargs
     ):
+        print(">>> inference() called; rex_model present?", hasattr(self, "rex_model"))
+        if not hasattr(self, 'rex_model'):
+            raise RuntimeError("Rex-Omni model not initialized. Check container logs for initialization errors.")
+
         image = self._decode_image(image_data)
         
         # Ensure categories is properly formatted
@@ -119,6 +150,14 @@ class RexOmniService:
         import numpy as np
         import torch
         
+        print(">>> sam_inference() called; rex_model present?", hasattr(self, "rex_model"))
+        print(">>> sam_inference() called; sam_predictor present?", hasattr(self, "sam_predictor"))
+        if not hasattr(self, 'rex_model'):
+            raise RuntimeError("Rex-Omni model not initialized. Check container logs for initialization errors.")
+            
+        if not hasattr(self, 'sam_predictor'):
+            raise RuntimeError("SAM model not initialized. Check container logs for initialization errors.")
+
         image = self._decode_image(image_data)
         image_np = np.array(image)
         
@@ -207,6 +246,7 @@ class RexOmniService:
 
     @method()
     def grounding_inference(self, image_data: str, caption: str):
+        print(">>> grounding_inference() called; nlp present?", hasattr(self, "nlp"))
         image = self._decode_image(image_data)
         
         # 1. Extract phrases with Spacy
@@ -227,6 +267,9 @@ class RexOmniService:
         unique_phrases = list(set(p["text"] for p in phrases))
         
         # 2. Ground with Rex-Omni
+        if not hasattr(self, 'rex_model'):
+             raise RuntimeError("Rex-Omni model not initialized. Check container logs for initialization errors.")
+
         rex_results = self.rex_model.inference(
             images=[image],
             task="detection",
@@ -260,11 +303,11 @@ class RexOmniService:
             "annotations": annotations
         }
 
+# FastAPI endpoints that trigger Modal class methods
 @app.function()
 @fastapi_endpoint(method="POST")
 def api_inference(item: Dict = Body(...)):
-    service = RexOmniService()
-    return service.inference.remote(
+    return RexOmniService().inference.remote(
         image_data=item["image"],
         task=item.get("task", "detection"),
         categories=item.get("categories"),
@@ -276,8 +319,7 @@ def api_inference(item: Dict = Body(...)):
 @app.function()
 @fastapi_endpoint(method="POST")
 def api_sam(item: Dict = Body(...)):
-    service = RexOmniService()
-    return service.sam_inference.remote(
+    return RexOmniService().sam_inference.remote(
         image_data=item["image"],
         categories=item["categories"]
     )
@@ -285,8 +327,7 @@ def api_sam(item: Dict = Body(...)):
 @app.function()
 @fastapi_endpoint(method="POST")
 def api_grounding(item: Dict = Body(...)):
-    service = RexOmniService()
-    return service.grounding_inference.remote(
+    return RexOmniService().grounding_inference.remote(
         image_data=item["image"],
         caption=item["caption"]
     )
