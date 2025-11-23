@@ -18,10 +18,15 @@ def download_models():
 
 image = (
     Image.from_registry("nvidia/cuda:12.4.0-devel-ubuntu22.04", add_python="3.10")
-    .run_commands("pip install torch==2.6.0 torchvision==0.21.0 --index-url https://download.pytorch.org/whl/cu124")
-    .run_commands("pip install vllm==0.8.2")
-    .run_commands("pip install flash-attn==2.7.4.post1")
-    .run_commands("pip install segment-anything spacy opencv-python pillow numpy transformers accelerate qwen_vl_utils shapely pycocotools gradio_image_prompter")
+    .apt_install("git", "libgl1")
+    .run_commands(
+        "pip install torch==2.6.0 torchvision==0.21.0 --index-url https://download.pytorch.org/whl/cu124",
+        "pip install ninja packaging psutil setuptools wheel",
+        "pip install flash-attn==2.7.4.post1 --no-build-isolation",
+        "pip install vllm==0.8.2",
+        "pip install git+https://github.com/facebookresearch/segment-anything.git",
+        "pip install spacy opencv-python pillow numpy transformers accelerate qwen_vl_utils shapely pycocotools gradio_image_prompter matplotlib"
+    )
     .run_function(download_models)
     .add_local_dir("/home/bakasur/Desktop/Rex-Omni/rex_omni", remote_path="/root/rex_omni")
 )
