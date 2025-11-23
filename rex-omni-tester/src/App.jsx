@@ -53,6 +53,7 @@ function App() {
 
         if (task === 'keypoint') {
           payload.keypoint_type = keypointType;
+          payload.categories = [keypointType];
         } else if (task === 'visual_prompting') {
           if (visualPromptBoxes) {
             try {
@@ -62,7 +63,9 @@ function App() {
             }
           }
           payload.categories = categories;
-        } else if (task !== 'ocr_box' && task !== 'ocr_polygon') {
+        } else if (task === 'ocr_box' || task === 'ocr_polygon') {
+          payload.categories = ['text'];
+        } else {
           payload.categories = categories;
         }
       } else if (service === 'sam') {
