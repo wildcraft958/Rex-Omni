@@ -6,7 +6,9 @@ function normalizeBox(box, naturalW, naturalH) {
     if (!box || box.length < 4) return null;
     let [a, b, c, d] = box;
 
-    const isRelative = Math.max(a, b, c, d) <= 1;
+    // If the largest value is <= 1.0, we assume it's a relative coordinate system (0-1).
+    // Otherwise, we treat it as absolute pixel coordinates.
+    const isRelative = Math.max(a, b, c, d) <= 1.0;
 
     if (isRelative) {
         a = a * naturalW;
@@ -15,24 +17,21 @@ function normalizeBox(box, naturalW, naturalH) {
         d = d * naturalH;
     }
 
-    // Heuristic: if c > a and d > b and (c > naturalW || d > naturalH) it's likely x2,y2
-    // Check if c represents width (w) by seeing if c <= naturalW && d <= naturalH and a + c <= naturalW
+    // At this point, a,b,c,d are in the absolute pixel space of the natural image.
+    // Now, we determine if it's [x1,y1,x2,y2] or [x,y,w,h]
     let x1, y1, x2, y2;
 
-    if (c > a && d > b && (a + c <= naturalW && b + d <= naturalH)) {
-        // treat as x,y,w,h
-        x1 = a;
-        y1 = b;
-        x2 = a + c;
-        y2 = b + d;
-    } else if (c > a && d > b) {
-        // treat as x1,y1,x2,y2
+    // A common heuristic: if c and d are smaller than a and b, it's likely x,y,w,h.
+    // Or if x2 (c) is much larger than the image width, it's likely width.
+    // A simple check is if c > a. If so, it's likely x2.
+    if (c > a && d > b) {
+        // Assumed to be [x1, y1, x2, y2]
         x1 = a;
         y1 = b;
         x2 = c;
         y2 = d;
     } else {
-        // fallback: treat as x,y,w,h
+        // Assumed to be [x, y, w, h]
         x1 = a;
         y1 = b;
         x2 = a + c;
@@ -68,17 +67,28 @@ function ImagePreview({ imageSrc, results }) {
         return { w: img.clientWidth, h: img.clientHeight };
     };
 
-    const gatherBoxes = () => {
-        const boxes = [];
-        if (!results) return boxes;
+    const gatherItems = () => {
+        const items = [];
+        if (!results) return items;
 
         const { extracted_predictions, sam_results, annotations } = results;
 
         if (extracted_predictions) {
-            Object.entries(extracted_predictions).forEach(([category, items]) => {
-                items.forEach((it) => {
-                    if (it.coords && Array.isArray(it.coords) && it.coords.length >= 4) {
-                        boxes.push({ box: it.coords, label: `${category}` });
+            Object.entries(extracted_predictions).forEach(([category, predictions]) => {
+                predictions.forEach((p) => {
+                    if (p.type === 'box' && p.coords) {
+                        items.push({ type: 'box', data: p.coords, label: category });
+                    } else if (p.type === 'point' && p.coords) {
+                        items.push({ type: 'point', data: p.coords, label: category });
+                    } else if (p.type === 'polygon' && p.coords) {
+                        items.push({ type: 'polygon', data: p.coords, label: category });
+                    } else if (p.type === 'keypoint' && p.bbox && p.keypoints) {
+                        items.push({ type: 'box', data: p.bbox, label: `${category} (bbox)` });
+                        Object.entries(p.keypoints).forEach(([kp_name, kp_coords]) => {
+                            if (kp_coords !== 'unvisible') {
+                                items.push({ type: 'point', data: kp_coords, label: kp_name });
+                            }
+                        });
                     }
                 });
             });
@@ -86,22 +96,25 @@ function ImagePreview({ imageSrc, results }) {
 
         if (sam_results) {
             sam_results.forEach((r) => {
-                if (r.box) boxes.push({ box: r.box, label: r.category || 'sam' });
+                if (r.box) items.push({ type: 'box', data: r.box, label: r.category || 'sam' });
+                if (r.polygons) {
+                    r.polygons.forEach(p => items.push({ type: 'polygon', data: p, label: r.category || 'sam' }));
+                }
             });
         }
 
         if (annotations) {
             annotations.forEach((ann) => {
                 if (ann.boxes && Array.isArray(ann.boxes)) {
-                    ann.boxes.forEach((b) => boxes.push({ box: b, label: ann.phrase || 'ann' }));
+                    ann.boxes.forEach((b) => items.push({ type: 'box', data: b, label: ann.phrase || 'ann' }));
                 }
             });
         }
 
-        return boxes;
+        return items;
     };
 
-    const boxes = gatherBoxes();
+    const renderableItems = gatherItems();
 
     const displayed = getDisplayedSize();
 
@@ -123,26 +136,61 @@ function ImagePreview({ imageSrc, results }) {
                 />
 
                 <div className="overlay">
-                    {boxes.map((bobj, i) => {
-                        const norm = normalizeBox(bobj.box, naturalSize.w || 1, naturalSize.h || 1);
-                        if (!norm) return null;
-                        const [x1, y1, x2, y2] = norm;
-                        const left = x1 * scale.x;
-                        const top = y1 * scale.y;
-                        const width = Math.max(0, (x2 - x1) * scale.x);
-                        const height = Math.max(0, (y2 - y1) * scale.y);
+                <svg className="overlay-svg" width={displayed.w} height={displayed.h}>
+                    {renderableItems.map((item, i) => {
+                        if (item.type === 'box') {
+                            const norm = normalizeBox(item.data, naturalSize.w || 1, naturalSize.h || 1);
+                            if (!norm) return null;
+                            const [x1, y1, x2, y2] = norm;
+                            const left = x1 * scale.x;
+                            const top = y1 * scale.y;
+                            const width = Math.max(0, (x2 - x1) * scale.x);
+                            const height = Math.max(0, (y2 - y1) * scale.y);
 
-                        return (
-                            <div
-                                key={i}
-                                className="overlay-box"
-                                style={{ left: `${left}px`, top: `${top}px`, width: `${width}px`, height: `${height}px` }}
-                                title={bobj.label}
-                            >
-                                <div className="overlay-label">{bobj.label}</div>
-                            </div>
-                        );
+                            return (
+                                <g key={i}>
+                                    <rect
+                                        x={left}
+                                        y={top}
+                                        width={width}
+                                        height={height}
+                                        className="overlay-box"
+                                    />
+                                    <text x={left} y={top - 5} className="overlay-label">
+                                        {item.label}
+                                    </text>
+                                </g>
+                            );
+                        } else if (item.type === 'point') {
+                            const [x, y] = item.data;
+                            const left = (x / (naturalSize.w || 1)) * displayed.w;
+                            const top = (y / (naturalSize.h || 1)) * displayed.h;
+
+                            return (
+                                <g key={i}>
+                                    <circle cx={left} cy={top} r="5" className="overlay-point" />
+                                    <text x={left + 7} y={top + 5} className="overlay-label">
+                                        {item.label}
+                                    </text>
+                                </g>
+                            );
+                        } else if (item.type === 'polygon') {
+                            const points = item.data
+                                .map(p => `${(p[0] / (naturalSize.w || 1)) * displayed.w},${(p[1] / (naturalSize.h || 1)) * displayed.h}`)
+                                .join(' ');
+
+                            return (
+                                <g key={i}>
+                                    <polygon points={points} className="overlay-polygon" />
+                                    <text x={(item.data[0][0] / (naturalSize.w || 1)) * displayed.w} y={(item.data[0][1] / (naturalSize.h || 1)) * displayed.h - 5} className="overlay-label">
+                                        {item.label}
+                                    </text>
+                                </g>
+                            );
+                        }
+                        return null;
                     })}
+                </svg>
                 </div>
             </div>
         </div>
