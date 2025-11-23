@@ -233,6 +233,21 @@
     margin-top: 0.25rem;
 }
 
+.code-block {
+    background: var(--bg-secondary);
+    padding: var(--spacing-md);
+    border-radius: var(--radius-sm);
+    overflow-x: auto;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    font-family: 'Monaco', 'Courier New', monospace;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    border: 1px solid var(--glass-border);
+    max-height: 600px;
+    overflow-y: auto;
+}
+
 @media (max-width: 768px) {
     .results-header {
         flex-direction: column;
