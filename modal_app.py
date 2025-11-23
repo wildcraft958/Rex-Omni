@@ -11,10 +11,11 @@ def download_models():
     # Download Spacy model
     import spacy
     import subprocess
-    subprocess.run(["python", "-m", "spacy", "download", "en_core_web_sm"])
+    import sys
+    subprocess.run([sys.executable, "-m", "spacy", "download", "en_core_web_sm"])
     
     # Download SAM checkpoint
-    subprocess.run(["wget", "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_h_4b8939.pth"])
+    subprocess.run(["wget", "-O", "/root/sam_vit_h_4b8939.pth", "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_h_4b8939.pth"])
 
 image = (
     Image.from_registry("nvidia/cuda:12.4.0-devel-ubuntu22.04", add_python="3.10")
@@ -62,7 +63,7 @@ class RexOmniService:
         )
 
         print("Initializing SAM Model...")
-        self.sam_checkpoint = "sam_vit_h_4b8939.pth"
+        self.sam_checkpoint = "/root/sam_vit_h_4b8939.pth"
         self.sam = sam_model_registry["vit_h"](checkpoint=self.sam_checkpoint)
         self.sam.to(device="cuda")
         self.sam_predictor = SamPredictor(self.sam)
@@ -294,6 +295,8 @@ def api_grounding(item: Dict = Body(...)):
 @fastapi_endpoint(method="GET")
 def health():
     try:
+        import sys
+        sys.path.append("/root")
         import rex_omni
         import torch
         return {
