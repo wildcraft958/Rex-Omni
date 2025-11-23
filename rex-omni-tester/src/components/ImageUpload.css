@@ -1,0 +1,40 @@
+.upload-icon {
+    font-size: 3rem;
+    margin-bottom: var(--spacing-md);
+    animation: bounce 2s ease-in-out infinite;
+}
+
+@keyframes bounce {
+
+    0%,
+    100% {
+        transform: translateY(0);
+    }
+
+    50% {
+        transform: translateY(-10px);
+    }
+}
+
+.upload-text {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: var(--spacing-xs);
+}
+
+.upload-hint {
+    font-size: 0.9rem;
+    color: var(--text-muted);
+}
+
+.file-info {
+    animation: fadeIn 0.3s ease-out;
+}
+
+.file-name {
+    font-size: 1rem;
+    color: var(--success);
+    font-weight: 600;
+    margin-bottom: var(--spacing-xs);
+}
