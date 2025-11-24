@@ -32,7 +32,7 @@ def build_vision_image():
     """Build image for SAM + Spacy vision processing"""
     return (
         Image.from_registry("nvidia/cuda:12.4.0-devel-ubuntu22.04", add_python="3.10")
-        .apt_install("git", "libgl1", "wget")
+        .apt_install("git", "libgl1", "libglib2.0-0", "wget")
         .run_commands(
             # Core stack
             "pip install torch==2.6.0 torchvision==0.21.0 --index-url https://download.pytorch.org/whl/cu124",
