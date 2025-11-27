@@ -81,10 +81,12 @@ class GroundingJsonDataset(Dataset):
         self._configure_image_processor(image_min_pixels, image_max_pixels)
             
         # Setup task function
-        if task_fn is not None:
+        if task_fn is None:
+            self.task_fn = None
+        elif isinstance(task_fn, dict):
             self.task_fn = BUILDER.build(task_fn)
         else:
-            self.task_fn = None
+            self.task_fn = task_fn
             
         self.id2name = None
 
