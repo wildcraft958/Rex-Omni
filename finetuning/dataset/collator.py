@@ -88,7 +88,12 @@ class DataCollatorForSupervisedDataset(object):
                     )
                 )
             )
-            grid_thw = torch.stack(grid_thw, dim=0)
+            grid_thw_tensors = []
+            for entry in grid_thw:
+                if not isinstance(entry, torch.Tensor):
+                    entry = torch.tensor(entry)
+                grid_thw_tensors.append(entry.to(dtype=torch.int32))
+            grid_thw = torch.stack(grid_thw_tensors, dim=0)
         else:
             concat_images = None
             grid_thw = None
@@ -172,7 +177,12 @@ class FlattenedDataCollatorForSupervisedDataset(DataCollatorForSupervisedDataset
                     )
                 )
             )
-            grid_thw = torch.stack(grid_thw, dim=0)
+            grid_thw_tensors = []
+            for entry in grid_thw:
+                if not isinstance(entry, torch.Tensor):
+                    entry = torch.tensor(entry)
+                grid_thw_tensors.append(entry.to(dtype=torch.int32))
+            grid_thw = torch.stack(grid_thw_tensors, dim=0)
         else:
             concat_images = None
             grid_thw = None

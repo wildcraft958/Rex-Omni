@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 import torch
 from PIL import Image
-from qwen_vl_utils import process_vision_info, smart_resize
+from qwen_vl_utils import process_vision_info
 
 from .parser import convert_boxes_to_normalized_bins, parse_prediction
 from .tasks import TASK_CONFIGS, TaskType, get_keypoint_config, get_task_config
@@ -179,6 +179,16 @@ class RexOmniWrapper:
             raise ValueError(
                 f"Unsupported backend: {self.backend}. Choose 'transformers' or 'vllm'."
             )
+
+    @staticmethod
+    def _collect_images_from_messages(messages: List[Dict]) -> List[Image.Image]:
+        """Extract raw PIL images from a chat message list."""
+        image_inputs: List[Image.Image] = []
+        for message in messages:
+            for content in message.get("content", []):
+                if isinstance(content, dict) and content.get("type") == "image":
+                    image_inputs.append(content.get("image"))
+        return [img for img in image_inputs if img is not None]
 
     def inference(
         self,
@@ -445,15 +455,6 @@ class RexOmniWrapper:
             )
             batch_prompts.append(prompt)
 
-            # Calculate resized dimensions
-            resized_height, resized_width = smart_resize(
-                h,
-                w,
-                28,
-                min_pixels=self.min_pixels,
-                max_pixels=self.max_pixels,
-            )
-
             # Prepare messages
             if self.model_type == "transformers":
                 messages = [
@@ -464,8 +465,6 @@ class RexOmniWrapper:
                             {
                                 "type": "image",
                                 "image": image,
-                                "resized_height": resized_height,
-                                "resized_width": resized_width,
                             },
                             {"type": "text", "text": prompt},
                         ],
@@ -497,7 +496,7 @@ class RexOmniWrapper:
             )
         else:
             batch_outputs, batch_generation_info = self._generate_transformers_batch(
-                batch_messages, images
+                batch_messages
             )
 
         # Parse results
@@ -519,19 +518,10 @@ class RexOmniWrapper:
                 task_type=task.value,
             )
 
-            # Calculate resized dimensions for result
-            resized_height, resized_width = smart_resize(
-                h,
-                w,
-                28,
-                min_pixels=self.min_pixels,
-                max_pixels=self.max_pixels,
-            )
-
             result = {
                 "success": True,
                 "image_size": (w, h),
-                "resized_size": (resized_width, resized_height),
+                "resized_size": (w, h),
                 "task": task.value,
                 "prompt": prompt,
                 "raw_output": raw_output,
@@ -569,18 +559,9 @@ class RexOmniWrapper:
             image_height=h,
         )
 
-        # Calculate resized dimensions using smart_resize
-        resized_height, resized_width = smart_resize(
-            h,
-            w,
-            28,
-            min_pixels=self.min_pixels,
-            max_pixels=self.max_pixels,
-        )
-
         # Prepare messages
         if self.model_type == "transformers":
-            # For transformers, use resized_height and resized_width
+            # For transformers, pass raw image (AutoProcessor handles resizing)
             messages = [
                 {"role": "system", "content": self.system_prompt},
                 {
@@ -589,8 +570,6 @@ class RexOmniWrapper:
                         {
                             "type": "image",
                             "image": image,
-                            "resized_height": resized_height,
-                            "resized_width": resized_width,
                         },
                         {"type": "text", "text": final_prompt},
                     ],
@@ -634,7 +613,7 @@ class RexOmniWrapper:
         return {
             "success": True,
             "image_size": (w, h),
-            "resized_size": (resized_width, resized_height),
+            "resized_size": (w, h),
             "task": task.value,
             "prompt": final_prompt,
             "raw_output": raw_output,
@@ -818,11 +797,20 @@ class RexOmniWrapper:
             messages, tokenize=False, add_generation_prompt=True
         )
 
+        image_inputs = self._collect_images_from_messages(messages)
+        if not image_inputs:
+            raise ValueError("Transformers backend requires at least one image per message.")
+
+        if len(image_inputs) == 1:
+            images_arg = [image_inputs[0]]
+        else:
+            images_arg = [image_inputs]
+
         # Process inputs
         generation_start = time.time()
         inputs = self.processor(
             text=[text],
-            images=[messages[1]["content"][0]["image"]],
+            images=images_arg,
             padding=True,
             return_tensors="pt",
         ).to(self.model.device)
@@ -840,6 +828,23 @@ class RexOmniWrapper:
 
         # Generate
         with torch.no_grad():
+            # DEBUG: Check inputs before generation
+            if "image_grid_thw" in inputs:
+                g = inputs["image_grid_thw"]
+                pv = inputs["pixel_values"]
+                print(f"\n[DEBUG] image_grid_thw shape: {g.shape}, values:\n{g}")
+                print(f"[DEBUG] pixel_values shape: {pv.shape}")
+                
+                # Consistency check
+                if isinstance(g, torch.Tensor):
+                    total_patches = g[:, 0].sum().item()
+                    if pv.shape[0] != total_patches:
+                        print(f"[ERROR] Mismatch: pixel_values has {pv.shape[0]} patches but grid_thw sums to {total_patches}")
+                    
+                    # Check for large values
+                    if (g > 200).any(): # Arbitrary threshold to check for huge grids
+                         print(f"[WARNING] Large grid values detected: {g.max().item()}")
+
             generated_ids = self.model.generate(**inputs, **generation_kwargs)
 
         generation_time = time.time() - generation_start
@@ -870,23 +875,35 @@ class RexOmniWrapper:
         }
 
     def _generate_transformers_batch(
-        self, batch_messages: List[List[Dict]], batch_images: List[Image.Image]
+        self, batch_messages: List[List[Dict]]
     ) -> Tuple[List[str], List[Dict]]:
         """Generate using Transformers model for batch processing"""
 
         # Prepare batch inputs
         batch_texts = []
+        batch_image_inputs = []
+
         for messages in batch_messages:
             text = self.processor.apply_chat_template(
                 messages, tokenize=False, add_generation_prompt=True
             )
             batch_texts.append(text)
 
+            imgs = self._collect_images_from_messages(messages)
+            if not imgs:
+                raise ValueError(
+                    "Transformers backend requires at least one image per message."
+                )
+            if len(imgs) == 1:
+                batch_image_inputs.append(imgs[0])
+            else:
+                batch_image_inputs.append(imgs)
+
         # Process inputs for batch
         generation_start = time.time()
         inputs = self.processor(
             text=batch_texts,
-            images=batch_images,
+            images=batch_image_inputs,
             padding=True,
             return_tensors="pt",
         ).to(self.model.device)
@@ -904,6 +921,21 @@ class RexOmniWrapper:
 
         # Generate for entire batch
         with torch.no_grad():
+            # DEBUG: Check inputs before generation
+            if "image_grid_thw" in inputs:
+                g = inputs["image_grid_thw"]
+                pv = inputs["pixel_values"]
+                print(f"\n[DEBUG BATCH] image_grid_thw shape: {g.shape}")
+                print(f"[DEBUG BATCH] pixel_values shape: {pv.shape}")
+                
+                if isinstance(g, torch.Tensor):
+                    # For batch, g is (B, 3) where first dim is patches per image
+                    # pixel_values is (Total_Patches, C, H, W)
+                    total_patches = g[:, 0].sum().item()
+                    if pv.shape[0] != total_patches:
+                        print(f"[ERROR BATCH] Mismatch: pixel_values has {pv.shape[0]} patches but grid_thw sums to {total_patches}")
+                        print(f"[DEBUG BATCH] grid_thw values:\n{g}")
+
             generated_ids = self.model.generate(**inputs, **generation_kwargs)
 
         generation_time = time.time() - generation_start

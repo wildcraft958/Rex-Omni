@@ -285,6 +285,26 @@ class GroundingTSVDataset(Dataset):
 
             data_dict["pixel_values"] = image
             data_dict["image_grid_thw"] = grid_thw
+            
+            # DEBUG: Verify consistency between pixel_values and grid_thw
+            try:
+                if isinstance(image, torch.Tensor) and isinstance(grid_thw, list) and len(grid_thw) > 0:
+                    # image: (num_patches, C, H, W)
+                    # grid_thw: [Tensor(3)] containing (T, H, W)
+                    
+                    num_patches_img = image.shape[0]
+                    if isinstance(grid_thw[0], torch.Tensor):
+                        num_patches_grid = grid_thw[0][0].item()
+                        
+                        if num_patches_img != num_patches_grid:
+                            print(f"CRITICAL WARNING: Image patches {num_patches_img} != Grid T {num_patches_grid} for image {i}")
+                            return self.__getitem__((i + 1) % len(self.data))
+                            
+                        if (grid_thw[0] > 200).any():
+                             print(f"WARNING: Large grid values detected for image {i}: {grid_thw[0].tolist()}")
+            except Exception as e:
+                print(f"Error checking consistency: {e}")
+
         else:
             grid_thw_merged = None
             sources = copy.deepcopy([e["conversations"] for e in sources])
